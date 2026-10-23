@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Agente IA FUTBOL - Resultados de Partidos</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+
+  <div class="chat-app">
+    <!-- Encabezado Principal -->
+    <header class="header">
+      <div class="header-icon">⚽</div>
+      <div class="header-info">
+        <h1>FUTBOL</h1>
+        <p>Agente de IA para consulta de resultados de partidos</p>
+      </div>
+    </header>
+
+    <!-- ZONA CHAT: Historial de mensajes -->
+    <section class="ZONA CHAT" id="zona-chat" aria-label="Historial de conversación">
+      <!-- Mensaje de bienvenida del agente -->
+      <article class="message agent-message">
+        <div class="avatar">🤖</div>
+        <div class="bubble">
+          ¡Hola! Soy <strong>FUTBOL</strong>, tu asistente de Inteligencia Artificial. ¿De qué partido te gustaría conocer el resultado hoy?
+        </div>
+      </article>
+    </section>
+
+    <!-- ZONA ESCRITURA: Área de entrada de texto y envío -->
+    <section class="ZONA ESCRITURA" id="zona-escritura">
+      <form id="chat-form" class="input-form">
+        <textarea 
+          id="user-input" 
+          placeholder="Ej: ¿Cómo salió el partido entre Real Madrid y Barcelona?" 
+          rows="1" 
+          required
+        ></textarea>
+        <button type="submit" id="send-btn" class="send-button" aria-label="Enviar mensaje">
+          <svg class="send-icon" viewBox="0 0 24 24">
+            <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+          </svg>
+        </button>
+      </form>
+    </section>
+  </div>
+
+  <!-- Archivos de script -->
+  <script src="config.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>
