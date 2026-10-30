@@ -6,8 +6,8 @@ const sendBtn = document.getElementById("send-btn");
 
 // Variables de estado
 let isWaiting = false;
-const TIMEOUT_MS = 10000; // Tiempo límite de 10 segundos
-const COOLDOWN_MS = 2000; // Tiempo de espera entre envíos (2 segundos)
+const TIMEOUT_MS = 30000; // Ampliado a 30 segundos para dar tiempo a la IA
+const COOLDOWN_MS = 1000; // Tiempo de espera entre envíos
 
 // Event Listener para el formulario de envío
 chatForm.addEventListener("submit", async (e) => {
@@ -57,13 +57,27 @@ async function sendMessageToAgent(promptText) {
       throw new Error(`Error en el servidor: ${response.status}`);
     }
 
-    const data = await response.json();
-    
+    // Leer la respuesta primero como texto plano
+    const rawText = await response.text();
+    let reply = "";
+
+    // Intentar interpretar si la respuesta vino como JSON o como texto directo de Make
+    try {
+      const data = JSON.parse(rawText);
+      reply = data.reply || data.respuesta || data.answer || data.text || rawText;
+    } catch (parseError) {
+      // Si no es un JSON válido, tomar el texto directo devuelto por el Webhook
+      reply = rawText;
+    }
+
     // Eliminar indicador de carga
     loadingElement.remove();
 
     // Mostrar respuesta obtenida
-    const reply = data.reply || data.respuesta || "No se pudo obtener el resultado del partido.";
+    if (!reply || reply.trim() === "") {
+      reply = "No se obtuvo respuesta del asistente.";
+    }
+    
     appendMessage("agent", reply);
 
   } catch (error) {
