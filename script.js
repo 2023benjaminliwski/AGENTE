@@ -99,7 +99,6 @@ function procesarRespuestaMake(textoCrudo) {
   } catch (e) {
     if (!pareceObjeto) return limpio;
 
-    // Reintentar escapando saltos de línea crudos dentro de valores
     try {
       const reparado = limpio.replace(/\r?\n/g, "\\n");
       const datosReparados = JSON.parse(reparado);
@@ -116,9 +115,8 @@ function procesarRespuestaMake(textoCrudo) {
   }
 }
 
-// Event Listener para el formulario de envío
-chatForm.addEventListener("submit", async (e) => {
-  e.preventDefault();
+// Función central para validar y procesar el envío
+async function manejarEnvio() {
   const message = userInput.value.trim();
 
   if (!message || isWaiting) return;
@@ -139,13 +137,19 @@ chatForm.addEventListener("submit", async (e) => {
 
   // Enviar mensaje al agente
   await sendMessageToAgent(message);
+}
+
+// Event Listener para el botón de enviar
+chatForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  await manejarEnvio();
 });
 
-// Permite enviar con la tecla Enter sin Shift+Enter
-userInput.addEventListener("keydown", (e) => {
+// Permite enviar directamente con la tecla Enter sin Shift+Enter
+userInput.addEventListener("keydown", async (e) => {
   if (e.key === "Enter" && !e.shiftKey) {
     e.preventDefault();
-    chatForm.dispatchEvent(new Event("submit"));
+    await manejarEnvio();
   }
 });
 
