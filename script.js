@@ -4,43 +4,116 @@ const chatForm = document.getElementById("chat-form");
 const userInput = document.getElementById("user-input");
 const sendBtn = document.getElementById("send-btn");
 
-// Constantes de configuración y límites
+// Variables de estado y constantes
 let isWaiting = false;
-const TIMEOUT_MS = 30000; // Límite de 30 segundos
-const COOLDOWN_MS = 1500; // Pausa mínima de 1,5 segundos entre envíos
-const MAX_CHARS = 500; // Límite de caracteres por mensaje
+let sessionIdMemoria = "";
+const TIMEOUT_MS = 30000;
+const COOLDOWN_MS = 1500;
+const MAX_CARACTERES = 500;
+const CLAVE_SESION = "promptin_session_id";
 
-// Inicialización del identificador de sesión único
-const sessionId = obtenerSessionId();
-
+// Genera o recupera un identificador único de sesión
 function obtenerSessionId() {
-  const claveStorage = "promptin_session_id";
-  let idGuardado = null;
-
   try {
-    idGuardado = localStorage.getItem(claveStorage);
+    const guardado = localStorage.getItem(CLAVE_SESION);
+    if (guardado) return guardado;
   } catch (e) {
-    // Si localStorage está bloqueado, se usará memoria
+    if (sessionIdMemoria) return sessionIdMemoria;
   }
-
-  if (idGuardado) return idGuardado;
 
   const nuevoId = (typeof crypto !== "undefined" && crypto.randomUUID)
     ? crypto.randomUUID()
-    : `sess_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
+    : `ses-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
 
   try {
-    localStorage.setItem(claveStorage, nuevoId);
+    localStorage.setItem(CLAVE_SESION, nuevoId);
   } catch (e) {
-    // Continuar usando el ID en memoria
+    sessionIdMemoria = nuevoId;
   }
 
   return nuevoId;
 }
 
-// Asegurar límite de caracteres en el HTML
-if (userInput) {
-  userInput.setAttribute("maxlength", MAX_CHARS);
+const sessionId = obtenerSessionId();
+
+// Verifica si la URL del webhook está configurada
+function webhookConfigurado() {
+  if (typeof WEBHOOK_URL !== "string") return false;
+  const url = WEBHOOK_URL.trim();
+  if (!url) return false;
+  if (url.includes("ACA VA") || url.includes("ejemplo-webhook-prueba")) return false;
+  return true;
+}
+
+// Limpia envoltorios Markdown como ```json y ```
+function limpiarMarkdown(texto) {
+  return texto
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/i, "")
+    .trim();
+}
+
+// Busca la primera propiedad de texto válida en un objeto
+function extraerCampoRespuesta(obj) {
+  const claves = ["response", "respuesta", "message", "mensaje"];
+  for (const clave of claves) {
+    if (typeof obj[clave] === "string" && obj[clave].trim() !== "") {
+      return obj[clave];
+    }
+  }
+  return null;
+}
+
+// Extrae valor de texto por expresión regular si el JSON viene mal escapado
+function extraerPorRegex(texto) {
+  const claves = ["response", "respuesta", "message", "mensaje"];
+  for (const clave of claves) {
+    const regex = new RegExp(`"${clave}"\\s*:\\s*"([\\s\\S]*?)"\\s*(?:,|\\})`);
+    const coincidencia = texto.match(regex);
+    if (coincidencia && coincidencia[1].trim() !== "") {
+      return coincidencia[1]
+        .replace(/\\n/g, "\n")
+        .replace(/\\r/g, "\r")
+        .replace(/\\"/g, '"');
+    }
+  }
+  return null;
+}
+
+// Analiza la respuesta de Make de forma tolerante a errores de formato
+function procesarRespuestaMake(textoCrudo) {
+  if (!textoCrudo) return "(respuesta vacía)";
+
+  const limpio = limpiarMarkdown(textoCrudo);
+  if (!limpio) return "(respuesta vacía)";
+
+  const pareceObjeto = limpio.startsWith("{") && limpio.endsWith("}");
+
+  try {
+    const datos = JSON.parse(limpio);
+    if (datos !== null && typeof datos === "object" && !Array.isArray(datos)) {
+      const campo = extraerCampoRespuesta(datos);
+      return campo !== null ? campo : "Make respondió, pero sin el campo response";
+    }
+    return limpio;
+  } catch (e) {
+    if (!pareceObjeto) return limpio;
+
+    // Reintentar escapando saltos de línea crudos dentro de valores
+    try {
+      const reparado = limpio.replace(/\r?\n/g, "\\n");
+      const datosReparados = JSON.parse(reparado);
+      if (datosReparados !== null && typeof datosReparados === "object" && !Array.isArray(datosReparados)) {
+        const campo = extraerCampoRespuesta(datosReparados);
+        return campo !== null ? campo : "Make respondió, pero sin el campo response";
+      }
+    } catch (e2) {
+      const porRegex = extraerPorRegex(limpio);
+      if (porRegex !== null) return porRegex;
+    }
+
+    return "Make respondió, pero sin el campo response";
+  }
 }
 
 // Event Listener para el formulario de envío
@@ -50,13 +123,12 @@ chatForm.addEventListener("submit", async (e) => {
 
   if (!message || isWaiting) return;
 
-  if (message.length > MAX_CHARS) {
-    appendMessage("agent", `El mensaje no puede superar los ${MAX_CHARS} caracteres.`, true);
+  if (message.length > MAX_CARACTERES) {
+    appendMessage("agent", `El mensaje no puede superar los ${MAX_CARACTERES} caracteres.`, true);
     return;
   }
 
-  // Verificar si WEBHOOK_URL está configurada correctamente
-  if (!esUrlValida()) {
+  if (!webhookConfigurado()) {
     appendMessage("agent", "Falta pegar la URL de tu webhook en config.js", true);
     return;
   }
@@ -77,16 +149,6 @@ userInput.addEventListener("keydown", (e) => {
   }
 });
 
-// Verifica que la constante WEBHOOK_URL exista y no tenga valores de ejemplo
-function esUrlValida() {
-  if (typeof WEBHOOK_URL === "undefined" || !WEBHOOK_URL) return false;
-  const url = String(WEBHOOK_URL).trim();
-  if (url === "" || url.includes("ACA VA") || url.includes("ejemplo-webhook-prueba")) {
-    return false;
-  }
-  return true;
-}
-
 // Función para enviar la consulta al Webhook con protección y manejo asíncrono
 async function sendMessageToAgent(mensaje) {
   setLoadingState(true);
@@ -95,115 +157,54 @@ async function sendMessageToAgent(mensaje) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
-  const payload = {
-    sessionId: sessionId,
-    mensaje: mensaje,
-    fecha: new Date().toISOString()
-  };
-
   try {
-    const respuesta = await fetch(WEBHOOK_URL, {
+    const fecha = new Date().toISOString();
+    const response = await fetch(WEBHOOK_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ sessionId, mensaje, fecha }),
       signal: controller.signal
     });
 
     clearTimeout(timeoutId);
 
-    if (!respuesta.ok) {
+    const rawText = (await response.text()).trim();
+
+    if (!response.ok) {
       loadingElement.remove();
       appendMessage(
         "agent",
-        `Make respondió con error (código ${respuesta.status}). Revisá que tu escenario esté en Active o que hayas apretado Run once.`,
+        `Make respondió con error (código ${response.status}). Revisá que tu escenario esté en Active o que hayas apretado Run once.`,
         true
       );
       return;
     }
 
-    const textoCrudo = (await respuesta.text()).trim();
+    const textoFinal = procesarRespuestaMake(rawText);
     loadingElement.remove();
-
-    if (!textoCrudo) {
-      appendMessage("agent", "(respuesta vacía)");
-      return;
-    }
-
-    const textoFinal = procesarRespuestaMake(textoCrudo);
     appendMessage("agent", textoFinal);
 
   } catch (error) {
     clearTimeout(timeoutId);
     loadingElement.remove();
 
-    let errorMessage = "Error de red al conectar con Make. Verificá tu conexión a internet.";
+    let errorMessage = "Error de red: no se pudo conectar con Make. Revisá tu conexión a internet.";
     if (error.name === "AbortError") {
-      errorMessage = "Tiempo agotado: Make tardó más de 30 segundos en responder.";
+      errorMessage = "Tiempo agotado: Make tardó más de 30 segundos en responder. Intentá de nuevo.";
     }
 
     appendMessage("agent", errorMessage, true);
   } finally {
-    // Garantiza que nunca quede bloqueado tras la pausa mínima
     setTimeout(() => {
       setLoadingState(false);
     }, COOLDOWN_MS);
   }
 }
 
-// Limpia bloques Markdown y extrae la respuesta de forma tolerante a errores de formato
-function procesarRespuestaMake(texto) {
-  // Quitar envoltorios ```json ... ``` o ``` ... ```
-  let limpio = texto
-    .replace(/^```(?:json)?\s*/i, "")
-    .replace(/\s*```$/i, "")
-    .trim();
-
-  // Verificar si parece un objeto JSON
-  if (limpio.startsWith("{") && limpio.endsWith("}")) {
-    let objeto = intentarParsearJson(limpio);
-
-    if (objeto && typeof objeto === "object" && !Array.isArray(objeto)) {
-      const campos = ["response", "respuesta", "message", "mensaje"];
-      for (const campo of campos) {
-        if (typeof objeto[campo] === "string" && objeto[campo].trim() !== "") {
-          return objeto[campo];
-        }
-      }
-      return "Make respondió, pero sin el campo response";
-    }
-
-    // Fallback por expresión regular si JSON.parse falló por saltos de línea sin escapar
-    const extraidoRegex = extraerPorRegex(limpio);
-    if (extraidoRegex !== null) {
-      return extraidoRegex;
-    }
-  }
-
-  // Si no es un objeto válido (es texto plano, número, array, etc.), devolver tal cual
-  return limpio;
-}
-
-// Intenta parsear JSON y reintenta escapando saltos de línea dentro de valores string
-function intentarParsearJson(textoJson) {
-  try {
-    return JSON.parse(textoJson);
-  } catch (e) {
-    try {
-      const escapado = textoJson.replace(/"([^"\\]*(?:\\.[^"\\]*)*)"/g, (match) => {
-        return match.replace(/\n/g, "\\n").replace(/\r/g, "\\r");
-      });
-      return JSON.parse(escapado);
-    } catch (e2) {
-      return null;
-    }
-  }
-}
-
-// Extrae manualmente el valor de response, respuesta, message o mensaje si el JSON está roto
-function extraerPorRegex(texto) {
-  const campos = ["response", "respuesta", "message", "mensaje"];
-  for (const campo of campos) {
-    const regex = new RegExp(`"${campo}"\\s*:\\s*"([\\s\\S]*?)"\\s*(?:,\vert{}\\})`); const match = texto.match(regex); if (match && match[1].trim() !== "") { return match[1].replace(/\\n/g, "\n").replace(/\\"/g, '"'); } } return null; }  // Función auxiliar para agregar burbujas al DOM en la ZONA CHAT (usando textContent) function appendMessage(sender, text, isError = false) { const messageArticle = document.createElement("article"); messageArticle.classList.add("message", `${sender}-message`);
+// Función auxiliar para agregar burbujas al DOM en la ZONA CHAT
+function appendMessage(sender, text, isError = false) {
+  const messageArticle = document.createElement("article");
+  messageArticle.classList.add("message", `${sender}-message`);
   if (isError) messageArticle.classList.add("error");
 
   const avatarDiv = document.createElement("div");
@@ -233,16 +234,16 @@ function appendLoadingIndicator() {
   const bubbleDiv = document.createElement("div");
   bubbleDiv.classList.add("bubble");
 
-  const dotsContainer = document.createElement("div");
-  dotsContainer.classList.add("loading-dots");
+  const dotsDiv = document.createElement("div");
+  dotsDiv.classList.add("loading-dots");
 
   for (let i = 0; i < 3; i++) {
     const dot = document.createElement("div");
     dot.classList.add("dot");
-    dotsContainer.appendChild(dot);
+    dotsDiv.appendChild(dot);
   }
 
-  bubbleDiv.appendChild(dotsContainer);
+  bubbleDiv.appendChild(dotsDiv);
   loadingArticle.appendChild(avatarDiv);
   loadingArticle.appendChild(bubbleDiv);
 
